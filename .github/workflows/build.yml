@@ -9,6 +9,10 @@ jobs:
         arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v3
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev llvm-dev libopencv-dev python3-opencv build-essential pkg-config
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install Python
