@@ -1,0 +1,24 @@
+[package]
+name = "owl-rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "owl_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+opencv = { workspace = true }
+ndarray = { workspace = true }
+rayon = { workspace = true }
+numpy = { workspace = true }
+pyo3 = { workspace = true }
+owl-detection = { path = "../owl-detection" }
+owl-vision = { path = "../owl-vision" }
+owl-hardware = { path = "../owl-hardware" }
+
+[features]
+extension-module = ["pyo3/extension-module"]
+
+[build-dependencies]
+

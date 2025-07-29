@@ -1,0 +1,13 @@
+[package]
+name = "owl-detection"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+opencv = { workspace = true }
+ndarray = { workspace = true }
+rayon = { workspace = true }
+thiserror = "1"
+
+[features]
+default = []

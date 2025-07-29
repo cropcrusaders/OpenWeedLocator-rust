@@ -7,9 +7,11 @@
 Welcome to the OpenWeedLocator (OWL) project, an opensource hardware and software weed detector that uses
 entirely off-the-shelf componentry, very simple green-detection algorithms (with capacity to upgrade to
 in-crop detection) and 3D printable parts. OWL integrates weed detection on a Raspberry Pi with a relay
-control board or custom driver board, in a custom designed case so you can attach any 12V solenoid, relay, lightbulb or 
+control board or custom driver board, in a custom designed case so you can attach any 12V solenoid, relay, lightbulb or
 device for low-cost, simple and open-source site-specific weed control. Projects to date have seen OWL mounted on robots,
 vehicles and bicycles for spot spraying. For the latest ideas and news, check out the [Discussion](https://github.com/geezacoleman/OpenWeedLocator/discussions) tab.
+
+> **Note**: This fork integrates experimental Rust components for improved performance. It is under active development and APIs may change.
 
 ### News
 **14-02-2025** - Complete OWL software installation guide now on YouTube

@@ -1,0 +1,12 @@
+rust_features:
+  detection_algorithms: true
+  image_processing: false
+  hardware_control: false
+
+performance_monitoring:
+  enabled: true
+  metrics_endpoint: "http://localhost:8080/metrics"
+
+fallback_strategy:
+  auto_fallback_on_error: true
+  performance_threshold_ms: 100
