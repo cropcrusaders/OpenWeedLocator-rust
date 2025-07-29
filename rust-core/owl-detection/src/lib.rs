@@ -29,15 +29,14 @@ pub fn detect_green_on_brown(
     // Convert ndarray view into OpenCV Mat without copying
     let rows = image.shape()[0] as i32;
     let cols = image.shape()[1] as i32;
-    // SAFETY: The ndarray data comes from a contiguous numpy array
-    let mat = unsafe {
-        core::Mat::new_rows_cols_with_data_unsafe_def(
-            rows,
-            cols,
-            core::CV_8UC3,
-            image.as_ptr() as *mut c_void,
-        )?
-    };
+    // Create a new OpenCV Mat by copying the data from the ndarray
+    let mat = core::Mat::from_slice_2d(
+        &image
+            .outer_iter()
+            .map(|row| row.as_slice().unwrap())
+            .collect::<Vec<_>>(),
+    )?
+    .reshape(3, rows)?;
     let mut hsv = core::Mat::default();
     imgproc::cvt_color(&mat, &mut hsv, imgproc::COLOR_RGB2HSV, 0)?;
 
