@@ -1,0 +1,20 @@
+FROM python:3.11-slim-bullseye
+
+# Install Rust and system dependencies
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install OpenCV and build dependencies
+RUN apt-get update && apt-get install -y \
+    libopencv-dev \
+    python3-opencv \
+    build-essential \
+    pkg-config
+
+COPY . /app
+WORKDIR /app
+RUN pip install maturin[patchelf]
+RUN maturin build --release --out dist
+RUN pip install dist/*.whl
+
+ENTRYPOINT ["python", "-m", "owl"]

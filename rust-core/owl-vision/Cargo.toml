@@ -1,0 +1,14 @@
+[package]
+name = "owl-vision"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+opencv = { workspace = true }
+rayon = { workspace = true }
+image = { workspace = true }
+ndarray = { workspace = true }
+thiserror = "1"
+
+[features]
+default = []

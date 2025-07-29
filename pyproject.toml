@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "openweedlocator"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.21.0",
+    "opencv-python>=4.6.0",
+    "RPi.GPIO>=0.7.1; platform_machine=='armv7l'",
+]
+
+[tool.maturin]
+python-source = "utils"
+module-name = "owl_rust"
+bindings = "pyo3"
+compatibility = "linux"

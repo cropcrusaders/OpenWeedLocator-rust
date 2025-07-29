@@ -3,10 +3,17 @@ from utils.algorithms import exg, exg_standardised, exg_standardised_hue, hsv, e
 import numpy as np
 import cv2
 
+try:
+    from owl_rust import detect_green_on_brown_py as rust_detect
+    RUST_AVAILABLE = True
+except Exception:
+    RUST_AVAILABLE = False
+
 
 class GreenOnBrown:
-    def __init__(self, algorithm='exg', label_file='models/labels.txt'):
+    def __init__(self, algorithm='exg', label_file='models/labels.txt', use_rust=RUST_AVAILABLE):
         self.algorithm = algorithm
+        self.use_rust = use_rust
         self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
         # Dictionary mapping algorithm names to functions
@@ -35,6 +42,14 @@ class GreenOnBrown:
                   invert_hue=False,
                   label='WEED'):
         threshed_already = False
+
+        if self.use_rust and RUST_AVAILABLE:
+            try:
+                rust_res = rust_detect(image, (hue_min, hue_max), pixel_count_threshold=min_detection_area)
+                if rust_res.get("count", 0) == 0:
+                    return [], [], [], image
+            except Exception:
+                pass
 
         # Retrieve the function based on the algorithm name
         func = self.algorithms.get(algorithm, exg_standardised_hue)
