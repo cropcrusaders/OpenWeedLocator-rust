@@ -17,8 +17,8 @@ fn detect_green_on_brown_py(
     if !enable_rust {
         return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Rust disabled"));
     }
-    let view = unsafe { image.as_array() };
-    match detect_green_on_brown(view, green_range, pixel_count_threshold) {
+    let view = image.to_owned_array()?;
+    match detect_green_on_brown(&view, green_range, pixel_count_threshold) {
         Ok(count) => {
             let dict = PyDict::new(py);
             dict.set_item("count", count)?;
