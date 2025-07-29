@@ -46,8 +46,8 @@ class GreenOnBrown:
         if self.use_rust and RUST_AVAILABLE:
             try:
                 rust_res = rust_detect(image, (hue_min, hue_max), pixel_count_threshold=min_detection_area)
-                if rust_res.get("count", 0) == 0:
-                    return [], [], [], image
+                if rust_res.get("count", 0) > 0:
+                    return rust_res.get("centres", []), rust_res.get("boxes", []), rust_res.get("labels", []), image
             except Exception:
                 pass
 
