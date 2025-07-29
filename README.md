@@ -11,7 +11,7 @@ control board or custom driver board, in a custom designed case so you can attac
 device for low-cost, simple and open-source site-specific weed control. Projects to date have seen OWL mounted on robots,
 vehicles and bicycles for spot spraying. For the latest ideas and news, check out the [Discussion](https://github.com/geezacoleman/OpenWeedLocator/discussions) tab.
 
-> **Note**: This fork integrates experimental Rust components for improved performance. It is under active development and APIs may change.
+> **Note**: This fork integrates experimental Rust components for improved performance. It is under active development and APIs may change. See [docs/opencv_build.md](docs/opencv_build.md) for details on setting up the OpenCV dependencies required for building the Rust code.
 
 ### News
 **14-02-2025** - Complete OWL software installation guide now on YouTube

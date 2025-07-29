@@ -9,6 +9,13 @@ jobs:
         arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install Python
@@ -16,7 +23,11 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang-14 llvm-14-dev libclang-14-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang-14 llvm-14-dev libclang-14-dev \
+            libopencv-dev pkg-config
       - name: Install maturin
         run: pip install maturin
       - name: Build wheels
