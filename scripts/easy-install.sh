@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "\xF0\x9F\x8C\xBE OpenWeedLocator Easy Installation"
+echo "🌾 OpenWeedLocator Easy Installation"
 echo "Detecting system architecture..."
 
 ARCH=$(uname -m)
