@@ -12,7 +12,16 @@ fn main() {
 
     // ensure libclang is discoverable
     if std::env::var("LIBCLANG_PATH").is_err() {
-        if !std::path::Path::new("/usr/lib/llvm-18/lib").exists() {
+        let common_paths = vec![
+            "/usr/lib/llvm-18/lib",
+            "/usr/lib/llvm-17/lib",
+            "/usr/lib/llvm-16/lib",
+            "/usr/local/lib",
+            "/opt/homebrew/opt/llvm/lib", // Common on macOS with Homebrew
+        ];
+        let libclang_path = common_paths.iter()
+            .find(|path| std::path::Path::new(path).exists());
+        if libclang_path.is_none() {
             eprintln!("error: libclang not found. Set LIBCLANG_PATH to the directory containing libclang.so");
             std::process::exit(1);
         }
