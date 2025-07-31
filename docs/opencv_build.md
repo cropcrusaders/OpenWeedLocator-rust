@@ -16,3 +16,23 @@ export OPENCV_VENDORED=1
 ```
 
 which compiles OpenCV from source, but increases build time significantly.
+
+If these packages are missing the Rust build will exit with an error similar to:
+
+```
+error: OpenCV development libraries not found. Install 'libopencv-dev' or set OPENCV_VENDORED=1 to build from source.
+```
+
+This helps diagnose missing dependencies before a lengthy compile starts.
+
+To use the latest clang toolchain on CI or GitHub Actions you can run:
+```
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+sudo ./llvm.sh 18
+sudo apt-get install -y clang-18 libclang-18-dev
+sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
+sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+export LIBCLANG_PATH=/usr/lib/llvm-18/lib
+```
+This ensures the OpenCV bindings are compiled against a recent Clang and libclang.
