@@ -16,3 +16,11 @@ export OPENCV_VENDORED=1
 ```
 
 which compiles OpenCV from source, but increases build time significantly.
+
+If these packages are missing the Rust build will exit with an error similar to:
+
+```
+error: OpenCV development libraries not found. Install 'libopencv-dev' or set OPENCV_VENDORED=1 to build from source.
+```
+
+This helps diagnose missing dependencies before a lengthy compile starts.
