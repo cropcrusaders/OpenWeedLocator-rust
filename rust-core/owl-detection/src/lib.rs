@@ -1,6 +1,5 @@
 use ndarray::ArrayView3;
-use opencv::{core, imgproc};
-use std::ffi::c_void;
+use opencv::{core, imgproc, prelude::*};
 
 use thiserror::Error;
 
