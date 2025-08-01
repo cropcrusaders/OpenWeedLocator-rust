@@ -3,7 +3,7 @@ members = ["owl-detection", "owl-vision", "owl-hardware", "python-bindings"]
 resolver = "2"
 
 [workspace.dependencies]
-opencv = "0.92"
+opencv = { version = "0.92", default-features = false, features = ["imgproc"] }
 image = "0.25"
 ndarray = "0.15"
 rayon = "1.8"
