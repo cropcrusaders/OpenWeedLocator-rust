@@ -144,17 +144,22 @@ Optional weed tracking using ByteTrack. When enabled, YOLO runs in tracking mode
 
 ### `[RustSpray]`
 
-Used when `algorithm = rustspray`. Runs the [Rust-Spray](https://github.com/cropcrusaders/Rust-Spray) binary as a high-performance detection inner loop: OWL keeps capturing frames with picamera2 and streams them to the subprocess as raw RGB24 over stdin; Rust-Spray returns per-lane spray decisions as newline-delimited JSON (IPC protocol v1, documented in Rust-Spray's `INTEGRATION.md`).
+Used when `algorithm = rustspray`. Runs the [Rust-Spray](https://github.com/cropcrusaders/Rust-Spray) binary as a high-performance detection inner loop: OWL keeps capturing frames with picamera2 and streams them to the subprocess as raw RGB24 over stdin; Rust-Spray returns per-lane spray decisions as newline-delimited JSON (IPC protocol v1 — the authoritative contract is `INTEGRATION.md` in the Rust-Spray repository).
 
-Colour thresholds and solenoid GPIO pins are configured in Rust-Spray's own TOML file, **not** in `[GreenOnBrown]` or `[Relays]`. If Rust-Spray drives the GPIO pins directly, its TOML pin assignments must match the `[Relays]` wiring — alternatively set `mock_gpio = True` and let OWL's relay controller keep driving the pins from the lane states.
+Colour thresholds (`[vision]`), lane count and hysteresis (`[lanes]`), and GPIO pins (`[gpio]`) are configured in Rust-Spray's own TOML file, **not** in `[GreenOnBrown]` or `[Relays]`. Set `[lanes] count` in the TOML equal to `relay_num`.
 
-At startup OWL verifies the binary's IPC protocol version (`rustspray --output-version`). If the subprocess crashes or misses the frame deadline it is restarted up to `max_restarts` times, after which OWL logs the failure and falls back to the Python `exg` detector automatically.
+**Who drives the solenoids?** Exactly one side must own the pins:
+
+- `mock_gpio = True` (default) — Rust-Spray only detects and reports lane states; OWL's relay controller keeps exclusive control of the `[Relays]` pins, including `delay` and `actuation_duration` handling.
+- `mock_gpio = False` — Rust-Spray applies lane states to its TOML `[gpio]` pins directly (lowest latency, but no `delay`/`actuation_duration` compensation — lanes follow detections with hysteresis) and OWL automatically stands down its own relay actuation. **Pin numbering differs:** OWL's `[Relays]` uses BOARD numbering, Rust-Spray's TOML uses BCM (e.g. BOARD 13, 15, 16, 18 = BCM 27, 22, 23, 24). Rust-Spray's shipped default pins (BCM 17, 27, 22, 23) do *not* match OWL's default wiring — always set them explicitly.
+
+At startup OWL verifies the binary's IPC protocol version (`rustspray --output-version`). If the subprocess crashes or misses the frame deadline it is restarted up to `max_restarts` times, after which OWL logs the failure and falls back to the Python `exg` detector automatically. Rust-Spray forces all lanes off on every exit path, so a crash never leaves a valve open.
 
 | Key | Default | Range / Valid values | Description |
 |-----|---------|---------------------|-------------|
 | `binary` | `/usr/local/bin/rustspray` | File path | Path to the `rustspray` binary (`rustspray-aarch64` for RPi 4/5, `rustspray-armv7` for RPi 3B+) |
 | `config` | `/etc/rustspray/config.toml` | File path | Rust-Spray TOML config (thresholds, lanes, GPIO pins) |
-| `mock_gpio` | `False` | `True` / `False` | Rust-Spray logs GPIO changes to stderr instead of driving pins. Use for development or when OWL's relay controller owns the pins |
+| `mock_gpio` | `True` | `True` / `False` | `True`: OWL's relay controller owns the pins, Rust-Spray only detects. `False`: Rust-Spray drives its own BCM pins and OWL stands down |
 | `frame_timeout_ms` | `100` | 10--5000 (integer) | Per-frame IPC deadline. 100 ms is safe at up to 30 km/h |
 | `max_restarts` | `3` | 0--10 (integer) | Subprocess restarts before falling back to the `exg` detector |
 

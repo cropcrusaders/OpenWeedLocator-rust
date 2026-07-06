@@ -14,6 +14,13 @@ IPC protocol v1 (see INTEGRATION.md in the Rust-Spray repository):
 If the subprocess dies or times out it is restarted up to ``max_restarts``
 times; after that ``inference()`` raises RuntimeError so the caller (owl.py)
 can fall back to the Python ExG detector.
+
+GPIO ownership: unless ``mock_gpio`` is set, Rust-Spray applies the lane
+states to its own (BCM-numbered) pins *before* each response is written —
+the JSON is a report of what was actuated, not a request. owl.py therefore
+suppresses its own relay actuation when this detector owns the GPIO; with
+``mock_gpio = True`` (OWL's shipped default) Rust-Spray only detects and
+OWL's relay controller keeps exclusive control of the pins.
 """
 import atexit
 import json
@@ -74,6 +81,7 @@ class RustSprayDetector:
         self._process = None
         self._stdout_queue = None
         self._stderr_tail = deque(maxlen=20)
+        self._lane_count_warned = False
         self._restart_count = 0
         self._frames_since_start = 0
         self._closed = False
@@ -97,8 +105,10 @@ class RustSprayDetector:
         Returns (contours, boxes, weed_centres, image_out). Contours are
         always empty; boxes/centres are synthesised per active lane.
         """
-        if image.ndim != 3 or image.shape[2] != 3:
-            raise ValueError(f"Expected a 3-channel BGR frame, got shape {image.shape}")
+        if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
+            raise ValueError(
+                f"Expected an HxWx3 uint8 BGR frame, got shape {image.shape} "
+                f"dtype {image.dtype}")
 
         height, width = image.shape[:2]
         # OWL frames are BGR (OpenCV); protocol v1 wants RGB24, R first
@@ -106,7 +116,15 @@ class RustSprayDetector:
 
         response = self._send_frame_with_recovery(frame_rgb24, width, height)
 
-        lanes = [bool(state) for state in response.get('lanes', [])][:self.num_lanes]
+        reported = response.get('lanes', [])
+        if len(reported) != self.num_lanes and not self._lane_count_warned:
+            self._lane_count_warned = True
+            logger.warning(
+                f"Rust-Spray reports {len(reported)} lanes but OWL expects "
+                f"{self.num_lanes} (relay_num) — check [lanes] count in "
+                f"{self.config_path}. Extra lanes are ignored, missing lanes "
+                f"stay off.")
+        lanes = [bool(state) for state in reported][:self.num_lanes]
         lanes += [False] * (self.num_lanes - len(lanes))
         self.last_lane_states = lanes
         self.last_latency_us = response.get('latency_us')
@@ -227,6 +245,21 @@ class RustSprayDetector:
         except (ValueError, OSError):
             pass
 
+    def _kill_process(self) -> None:
+        """Kill immediately — used on the restart path where the subprocess
+        is already broken or hung; waiting for a graceful EOF exit would
+        stall recovery well past the per-frame budget. Rust-Spray drives all
+        lanes off on every exit path, so this is safe."""
+        process = self._process
+        self._process = None
+        if process is None or process.poll() is not None:
+            return
+        try:
+            process.kill()
+            process.wait(timeout=1.0)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
     def _terminate_process(self) -> None:
         process = self._process
         self._process = None
@@ -313,7 +346,7 @@ class RustSprayDetector:
                     return self._send_frame(frame_rgb24, width, height)
                 except RustSprayIPCError as e:
                     if self._restart_count >= self.max_restarts:
-                        self._terminate_process()
+                        self._kill_process()
                         raise RuntimeError(
                             f"Rust-Spray backend failed after {self._restart_count} "
                             f"restart(s): {e}")
@@ -321,7 +354,7 @@ class RustSprayDetector:
                     logger.error(
                         f"Rust-Spray IPC failure: {e} — restarting subprocess "
                         f"({self._restart_count}/{self.max_restarts})")
-                    self._terminate_process()
+                    self._kill_process()
                     self._start_process()
 
     def _death_message(self, process) -> str:
@@ -338,20 +371,21 @@ class RustSprayDetector:
     def _lanes_to_detections(self, lanes, width, height):
         """Convert per-lane booleans into synthetic boxes/centres.
 
-        Lane i spans columns [i*lane_width, (i+1)*lane_width), matching
-        owl.py's relay mapping (relay_id = int(centre_x / lane_width)), so
-        each active lane maps back to exactly its own relay.
+        Uses Rust-Spray's exact lane geometry (src/lanes.rs): base width
+        ``width // num_lanes`` with the first ``width % num_lanes`` lanes one
+        pixel wider. Each centre sits mid-strip, so owl.py's relay mapping
+        (relay_id = int(centre_x / lane_width)) fires exactly that lane.
         """
         boxes = []
         weed_centres = []
-        lane_width = width / self.num_lanes
+        base_width, remainder = divmod(width, self.num_lanes)
+        x = 0
         for i, active in enumerate(lanes):
-            if not active:
-                continue
-            x = int(i * lane_width)
-            box_width = max(1, int(lane_width))
-            boxes.append([x, 0, box_width, height])
-            weed_centres.append([int((i + 0.5) * lane_width), height - 1])
+            lane_width = base_width + (1 if i < remainder else 0)
+            if active:
+                boxes.append([x, 0, max(1, lane_width), height])
+                weed_centres.append([x + lane_width // 2, height - 1])
+            x += lane_width
         return boxes, weed_centres
 
     @staticmethod

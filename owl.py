@@ -917,6 +917,12 @@ class Owl:
                         if self.controller:
                             self.controller.weed_detect_indicator()
 
+                    # In IPC mode Rust-Spray applies lane states to its own GPIO
+                    # pins before responding (unless mock_gpio) — stand down OWL's
+                    # relay actuation so two processes never drive the solenoids.
+                    rustspray_owns_gpio = (algorithm == 'rustspray'
+                                           and getattr(weed_detector, 'mock_gpio', True) is False)
+
                     # Zone-based actuation (segmentation models with gog/gog-hybrid)
                     if (algorithm.startswith('gog')
                             and actuation_mode == 'zone'
@@ -938,7 +944,7 @@ class Owl:
                     else:
                         # Centre-based actuation (default, works for all model types)
                         # One timestamp per frame, deduplicated relay calls (at most relay_num)
-                        if weed_centres:
+                        if weed_centres and not rustspray_owns_gpio:
                             actuation_time = time.time()
                             fired = set()
                             for centre in weed_centres:

@@ -119,7 +119,7 @@ const CONFIG_FIELD_DEFS = {
     'RustSpray': {
         'binary': { type: 'text', help: 'Path to the rustspray binary' },
         'config': { type: 'text', help: 'Path to the Rust-Spray TOML config (thresholds + GPIO pins)' },
-        'mock_gpio': { type: 'boolean', help: 'Log GPIO changes to stderr instead of driving pins (development)' },
+        'mock_gpio': { type: 'boolean', help: 'True (default): OWL relays keep the pins, Rust-Spray only detects. False: Rust-Spray drives its own BCM pins and OWL stands down' },
         'frame_timeout_ms': { type: 'number', min: 10, max: 5000, help: 'Per-frame IPC timeout in milliseconds' },
         'max_restarts': { type: 'number', min: 0, max: 10, help: 'Subprocess restarts before falling back to exg' }
     },

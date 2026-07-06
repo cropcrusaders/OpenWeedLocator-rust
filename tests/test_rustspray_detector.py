@@ -262,6 +262,42 @@ class TestDetection:
             pytest.fail(f"No mock GPIO line seen on stderr: {list(detector._stderr_tail)}")
 
 
+def _bare_detector(num_lanes):
+    """Detector instance without a subprocess, for pure geometry tests."""
+    detector = RustSprayDetector.__new__(RustSprayDetector)
+    detector.num_lanes = num_lanes
+    return detector
+
+
+class TestLaneGeometry:
+    """The synthetic boxes must match Rust-Spray's exact lane layout
+    (src/lanes.rs): base width = width // lanes, with the first
+    width % lanes strips one pixel wider."""
+
+    def test_divmod_strips_for_non_divisible_width(self):
+        detector = _bare_detector(4)
+        boxes, centres = detector._lanes_to_detections([True] * 4, width=70, height=48)
+
+        # 70 / 4 -> widths 18, 18, 17, 17 at x = 0, 18, 36, 53
+        assert [(x, w) for x, _, w, _ in boxes] == [(0, 18), (18, 18), (36, 17), (53, 17)]
+        assert [cx for cx, _ in centres] == [9, 27, 44, 61]
+        assert all(cy == 47 for _, cy in centres)
+
+    @pytest.mark.parametrize('width,num_lanes', [
+        (70, 4), (1427, 4), (1427, 16), (33, 8), (640, 12),
+    ])
+    def test_centres_map_to_their_own_relay(self, width, num_lanes):
+        """owl.py maps relay_id = int(centre_x / (width / relay_num)) — every
+        active lane's centre must land in its own relay, including when
+        width doesn't divide evenly."""
+        detector = _bare_detector(num_lanes)
+        _, centres = detector._lanes_to_detections([True] * num_lanes, width, height=100)
+
+        lane_width = width / num_lanes
+        relay_ids = [min(int(cx / lane_width), num_lanes - 1) for cx, _ in centres]
+        assert relay_ids == list(range(num_lanes))
+
+
 class TestRestartAndFallback:
     def test_recovers_when_subprocess_hangs(self, detector_factory, monkeypatch):
         monkeypatch.setenv('FAKE_RUSTSPRAY_HANG_AFTER', '2')
