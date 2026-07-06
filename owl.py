@@ -579,9 +579,22 @@ class Owl:
         # updated by SensitivityManager.apply_preset(), so do NOT re-read from config.
 
         def _create_detector(algo):
-            """Three-way detector factory."""
+            """Detector factory: gog, gog-hybrid, rustspray or GreenOnBrown."""
             current_classes = self._detect_classes_list or None
-            if algo == 'gog':
+            if algo == 'rustspray':
+                from utils.rustspray_detector import RustSprayDetector
+                return RustSprayDetector(
+                    binary_path=self.config.get('RustSpray', 'binary',
+                                                fallback='/usr/local/bin/rustspray'),
+                    config_path=self.config.get('RustSpray', 'config',
+                                                fallback='/etc/rustspray/config.toml'),
+                    num_lanes=self.relay_num,
+                    mock_gpio=self.config.getboolean('RustSpray', 'mock_gpio', fallback=False),
+                    frame_timeout_s=self.config.getint('RustSpray', 'frame_timeout_ms',
+                                                       fallback=100) / 1000.0,
+                    max_restarts=self.config.getint('RustSpray', 'max_restarts', fallback=3),
+                )
+            elif algo == 'gog':
                 from utils.greenongreen import GreenOnGreen
                 return GreenOnGreen(
                     model_path=self._model_path,
@@ -606,8 +619,17 @@ class Owl:
             else:
                 return GreenOnBrown(algorithm=algo)
 
+        def _close_detector(detector):
+            """Release subprocess-backed detectors (e.g. Rust-Spray)."""
+            if detector is not None and hasattr(detector, 'close'):
+                try:
+                    detector.close()
+                except Exception as e:
+                    self.logger.warning(f"Error closing detector: {e}")
+
         try:
             weed_detector = _create_detector(algorithm)
+            self._active_detector = weed_detector
             if algorithm in ('gog', 'gog-hybrid'):
                 self._gog_detector = weed_detector
 
@@ -615,6 +637,7 @@ class Owl:
             self.logger.error(f"[ERROR] Failed to create detector for '{algorithm}': {e}")
             self.logger.error("[ERROR] OWL will continue running without detection. Change algorithm via dashboard to recover.")
             weed_detector = None
+            self._active_detector = None
             if self.dash:
                 self.dash.state['algorithm_error'] = str(e)
 
@@ -685,7 +708,10 @@ class Owl:
                 # Live algorithm switching
                 if self._pending_algorithm and (weed_detector is None or self._pending_algorithm != algorithm):
                     try:
-                        weed_detector = _create_detector(self._pending_algorithm)
+                        new_detector = _create_detector(self._pending_algorithm)
+                        _close_detector(weed_detector)
+                        weed_detector = new_detector
+                        self._active_detector = weed_detector
                         algorithm = self._pending_algorithm
                         if algorithm in ('gog', 'gog-hybrid'):
                             self._gog_detector = weed_detector
@@ -706,7 +732,10 @@ class Owl:
                     self._pending_model = None
                     try:
                         self._model_path = new_model
-                        weed_detector = _create_detector(algorithm)
+                        new_detector = _create_detector(algorithm)
+                        _close_detector(weed_detector)
+                        weed_detector = new_detector
+                        self._active_detector = weed_detector
                         if algorithm in ('gog', 'gog-hybrid'):
                             self._gog_detector = weed_detector
                         self.logger.info(f"Live model switch to: {new_model}")
@@ -787,6 +816,43 @@ class Owl:
                             brightness_min=self.brightness_min, brightness_max=self.brightness_max,
                             min_detection_area=self.min_detection_area, invert_hue=self.invert_hue
                         )
+                    elif algorithm == 'rustspray':
+                        try:
+                            cnts, boxes, weed_centres, image_out = weed_detector.inference(
+                                cropped_frame,
+                                show_display=return_image_out,
+                                label='WEED'
+                            )
+                        except RuntimeError as e:
+                            # Rust-Spray inner loop failed permanently (crashed or
+                            # timed out beyond max_restarts) — fall back to the
+                            # Python ExG detector so spraying continues.
+                            self.logger.error(f"[ERROR] Rust-Spray backend failed: {e}")
+                            self.logger.error("[ERROR] Falling back to Python 'exg' detector.")
+                            _close_detector(weed_detector)
+                            algorithm = 'exg'
+                            weed_detector = _create_detector(algorithm)
+                            self._active_detector = weed_detector
+                            if self.dash:
+                                self.dash.state['algorithm'] = algorithm
+                                self.dash.state['algorithm_error'] = (
+                                    f"rustspray backend failed ({e}) — fell back to exg")
+                            cnts, boxes, weed_centres, image_out = weed_detector.inference(
+                                cropped_frame,
+                                exg_min=self.exg_min,
+                                exg_max=self.exg_max,
+                                hue_min=self.hue_min,
+                                hue_max=self.hue_max,
+                                saturation_min=self.saturation_min,
+                                saturation_max=self.saturation_max,
+                                brightness_min=self.brightness_min,
+                                brightness_max=self.brightness_max,
+                                show_display=return_image_out,
+                                algorithm=algorithm,
+                                min_detection_area=self.min_detection_area,
+                                invert_hue=self.invert_hue,
+                                label='WEED'
+                            )
                     else:
                         cnts, boxes, weed_centres, image_out = weed_detector.inference(
                             cropped_frame,
@@ -1047,6 +1113,15 @@ class Owl:
                         self.logger.error(f"Failed to terminate {name}: {terminate_error}")
 
         try:
+            # Stop subprocess-backed detector (e.g. Rust-Spray inner loop)
+            detector = getattr(self, '_active_detector', None)
+            if detector is not None and hasattr(detector, 'close'):
+                try:
+                    detector.close()
+                    self.logger.info("Stopped detector backend")
+                except Exception as e:
+                    self.logger.warning(f"Failed to close detector backend: {e}")
+
             # Stop controller processes
             if hasattr(self, 'controller') and self.controller:
                 safe_stop(self.controller, 'controller', fallback_to_terminate=False)
@@ -1610,6 +1685,16 @@ if __name__ == "__main__":
         show_display=args.show_display,
         input_file_or_directory=args.input
     )
+
+    # Shut down cleanly on `systemctl stop owl` (SIGTERM) so subprocess-backed
+    # detectors (Rust-Spray) and relays are released properly.
+    import signal
+
+    def _sigterm_handler(signum, frame):
+        logger.info("SIGTERM received - shutting down OWL")
+        owl.stop()
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     # start the targeting!
     owl.hoot()

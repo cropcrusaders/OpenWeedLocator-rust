@@ -130,15 +130,19 @@ class ConfigValidator:
         'track_class_window': ('int', 1, 20),
         'track_crop_persist': ('int', 1, 10),
         'detection_persist_frames': ('int', 0, 15),
+        # RustSpray backend
+        'frame_timeout_ms': ('int', 10, 5000),
+        'max_restarts': ('int', 0, 10),
         # Boolean fields
         'image_sample_enable': ('bool', None, None),
         'detection_enable': ('bool', None, None),
         'log_fps': ('bool', None, None),
         'invert_hue': ('bool', None, None),
         'tracking_enabled': ('bool', None, None),
+        'mock_gpio': ('bool', None, None),
     }
 
-    VALID_ALGORITHMS = {'exg', 'exgr', 'maxg', 'nexg', 'exhsv', 'hsv', 'gndvi', 'gog', 'gog-hybrid'}
+    VALID_ALGORITHMS = {'exg', 'exgr', 'maxg', 'nexg', 'exhsv', 'hsv', 'gndvi', 'gog', 'gog-hybrid', 'rustspray'}
 
     @classmethod
     def get_valid_algorithms(cls):
@@ -194,6 +198,10 @@ class ConfigValidator:
                               'new_track_thresh', 'track_buffer', 'match_thresh',
                               'track_class_window', 'track_crop_persist',
                               'detection_persist_frames'}
+        },
+        'RustSpray': {
+            'optional_keys': {'binary', 'config', 'mock_gpio',
+                              'frame_timeout_ms', 'max_restarts'}
         },
     }
 
