@@ -173,3 +173,10 @@ tmpclaude-*
 /agent_sessions/
 /docs/
 /examples/
+
+# Test-generated artifacts (written into the tree by the test suite;
+# intentionally kept benchmark baselines can still be committed with git add -f)
+config/my_saved.ini
+benchmarks/*_baseline_pre_gog_rewrite.json
+benchmarks/*_post_gog_rewrite.json
+benchmarks/*_cca_vs_contours.json
