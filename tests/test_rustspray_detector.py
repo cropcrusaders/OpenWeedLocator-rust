@@ -44,9 +44,10 @@ FAKE_RUSTSPRAY = r'''#!/usr/bin/env python3
 """Stand-in for the Rust-Spray binary implementing IPC protocol v1.
 
 Behaviour toggles (env vars, set by tests):
-  FAKE_RUSTSPRAY_PROTOCOL   -- protocol version to report and emit (default 1)
-  FAKE_RUSTSPRAY_HANG_AFTER -- frame index at which to stop responding
-  FAKE_RUSTSPRAY_DIE_AFTER  -- frame index at which to exit(1) without responding
+  FAKE_RUSTSPRAY_PROTOCOL           -- protocol version to report and emit (default 1)
+  FAKE_RUSTSPRAY_HANG_AFTER         -- frame index at which to stop responding
+  FAKE_RUSTSPRAY_DIE_AFTER          -- frame index at which to exit(1) without responding
+  FAKE_RUSTSPRAY_STOP_READING_AFTER -- frame index at which to stop reading stdin
 """
 import json
 import os
@@ -57,6 +58,7 @@ import time
 PROTOCOL = int(os.environ.get('FAKE_RUSTSPRAY_PROTOCOL', '1'))
 HANG_AFTER = os.environ.get('FAKE_RUSTSPRAY_HANG_AFTER')
 DIE_AFTER = os.environ.get('FAKE_RUSTSPRAY_DIE_AFTER')
+STOP_READING_AFTER = os.environ.get('FAKE_RUSTSPRAY_STOP_READING_AFTER')
 NUM_LANES = 4
 EXG_THRESHOLD = 20
 
@@ -83,6 +85,8 @@ def read_exact(stream, n):
 frame_num = 0
 prev_lanes = [False] * NUM_LANES
 while True:
+    if STOP_READING_AFTER is not None and frame_num >= int(STOP_READING_AFTER):
+        time.sleep(3600)  # simulate a wedged subprocess that stops draining stdin
     header = read_exact(sys.stdin.buffer, 8)
     if header is None:
         sys.exit(0)  # clean shutdown on stdin EOF
@@ -294,6 +298,49 @@ class TestRestartAndFallback:
         _, _, weed_centres, _ = detector.inference(make_frame(green_lanes=(1,)))
         assert len(weed_centres) == 1
         assert detector._restart_count == 1
+
+    def test_recovers_when_subprocess_stops_reading_stdin(self, detector_factory, monkeypatch):
+        """A wedged subprocess must not freeze OWL's main loop.
+
+        Real frames (e.g. 416x320x3 = ~400 KB) are far larger than the 64 KB
+        pipe buffer, so if the subprocess stops draining stdin a blocking
+        write would hang forever — with the sprayer stuck in its last state.
+        The write path must honour the frame deadline and recover by restart.
+        """
+        monkeypatch.setenv('FAKE_RUSTSPRAY_STOP_READING_AFTER', '1')
+        detector = detector_factory(frame_timeout_s=0.3)
+
+        # 256x128x3 = 96 KB — guaranteed to overflow the pipe buffer
+        big_frame = make_frame(green_lanes=(2,), width=256, height=128)
+        detector.inference(big_frame)                   # frame 0 — ok
+        start = time.time()
+        # frame 1: subprocess no longer reads stdin -> write stalls -> restart
+        _, _, weed_centres, _ = detector.inference(big_frame)
+        elapsed = time.time() - start
+
+        assert len(weed_centres) == 1
+        assert detector._restart_count == 1
+        assert elapsed < 5, f"write stall blocked the loop for {elapsed:.1f}s"
+
+    def test_restart_budget_resets_after_sustained_recovery(self, detector_factory):
+        """Transient hiccups spread across a long session must not accumulate
+        into a permanent exg fallback — a healthy run restores the budget."""
+        detector = detector_factory(max_restarts=2)
+        detector.RESTART_RESET_FRAMES = 3  # shrink the healthy-run threshold
+
+        # Three isolated crashes: more than max_restarts in total, but each
+        # followed by a healthy run — must keep recovering, never RuntimeError.
+        for _ in range(3):
+            detector._process.kill()
+            detector._process.wait()
+
+            _, _, weed_centres, _ = detector.inference(make_frame(green_lanes=(1,)))
+            assert len(weed_centres) == 1
+            assert detector._restart_count == 1
+
+            detector.inference(make_frame())
+            detector.inference(make_frame())  # 3rd healthy frame since restart
+            assert detector._restart_count == 0
 
     def test_raises_runtime_error_after_max_restarts(self, detector_factory, monkeypatch):
         """After max_restarts the detector must raise RuntimeError so owl.py

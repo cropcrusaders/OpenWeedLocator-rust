@@ -589,7 +589,10 @@ class Owl:
                     config_path=self.config.get('RustSpray', 'config',
                                                 fallback='/etc/rustspray/config.toml'),
                     num_lanes=self.relay_num,
-                    mock_gpio=self.config.getboolean('RustSpray', 'mock_gpio', fallback=False),
+                    # OWL's relay controller drives the solenoids from the
+                    # returned lane states — Rust-Spray must not claim the
+                    # same GPIO pins, so mock GPIO unless explicitly disabled.
+                    mock_gpio=self.config.getboolean('RustSpray', 'mock_gpio', fallback=True),
                     frame_timeout_s=self.config.getint('RustSpray', 'frame_timeout_ms',
                                                        fallback=100) / 1000.0,
                     max_restarts=self.config.getint('RustSpray', 'max_restarts', fallback=3),

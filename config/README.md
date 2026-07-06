@@ -146,7 +146,7 @@ Optional weed tracking using ByteTrack. When enabled, YOLO runs in tracking mode
 
 Used when `algorithm = rustspray`. Runs the [Rust-Spray](https://github.com/cropcrusaders/Rust-Spray) binary as a high-performance detection inner loop: OWL keeps capturing frames with picamera2 and streams them to the subprocess as raw RGB24 over stdin; Rust-Spray returns per-lane spray decisions as newline-delimited JSON (IPC protocol v1, documented in Rust-Spray's `INTEGRATION.md`).
 
-Colour thresholds and solenoid GPIO pins are configured in Rust-Spray's own TOML file, **not** in `[GreenOnBrown]` or `[Relays]`. If Rust-Spray drives the GPIO pins directly, its TOML pin assignments must match the `[Relays]` wiring — alternatively set `mock_gpio = True` and let OWL's relay controller keep driving the pins from the lane states.
+Colour thresholds are configured in Rust-Spray's own TOML file, **not** in `[GreenOnBrown]`. OWL's relay controller keeps driving the solenoids from the lane states Rust-Spray returns, so `mock_gpio` must stay `True` — two processes cannot claim the same GPIO pins (on recent Raspberry Pi OS the second claimant fails with "GPIO busy"). Only set `mock_gpio = False` in an advanced setup where Rust-Spray alone owns the solenoids; its TOML pin assignments must then match the `[Relays]` wiring.
 
 At startup OWL verifies the binary's IPC protocol version (`rustspray --output-version`). If the subprocess crashes or misses the frame deadline it is restarted up to `max_restarts` times, after which OWL logs the failure and falls back to the Python `exg` detector automatically.
 
@@ -154,7 +154,7 @@ At startup OWL verifies the binary's IPC protocol version (`rustspray --output-v
 |-----|---------|---------------------|-------------|
 | `binary` | `/usr/local/bin/rustspray` | File path | Path to the `rustspray` binary (`rustspray-aarch64` for RPi 4/5, `rustspray-armv7` for RPi 3B+) |
 | `config` | `/etc/rustspray/config.toml` | File path | Rust-Spray TOML config (thresholds, lanes, GPIO pins) |
-| `mock_gpio` | `False` | `True` / `False` | Rust-Spray logs GPIO changes to stderr instead of driving pins. Use for development or when OWL's relay controller owns the pins |
+| `mock_gpio` | `True` | `True` / `False` | Rust-Spray logs GPIO changes to stderr instead of driving pins. Keep `True`: OWL's relay controller owns the pins |
 | `frame_timeout_ms` | `100` | 10--5000 (integer) | Per-frame IPC deadline. 100 ms is safe at up to 30 km/h |
 | `max_restarts` | `3` | 0--10 (integer) | Subprocess restarts before falling back to the `exg` detector |
 

@@ -2,10 +2,13 @@
 """Wraps the Rust-Spray binary as a high-performance detection inner loop.
 
 Rust-Spray (github.com/cropcrusaders/Rust-Spray) performs SIMD-accelerated
-colour-based weed detection (ExG / green-ratio / chroma) and can drive the
-solenoid GPIO pins itself. OWL remains the outer shell: it owns frame capture
-(picamera2), scheduling, logging, the dashboard and config management, and
-streams frames to the Rust-Spray subprocess over stdin.
+colour-based weed detection (ExG / green-ratio / chroma). OWL remains the
+outer shell: it owns frame capture (picamera2), scheduling, logging, the
+dashboard, config management AND relay actuation — owl.py fires its own
+relay controller from the lane states returned here, so the subprocess is
+started with --mock-gpio by default (``mock_gpio=True``). Two processes must
+never claim the same GPIO pins; only set ``mock_gpio=False`` if Rust-Spray
+alone owns the solenoids.
 
 IPC protocol v1 (see INTEGRATION.md in the Rust-Spray repository):
   stdin  <- [u32 width LE][u32 height LE][width*height*3 bytes RGB24]
@@ -18,10 +21,13 @@ can fall back to the Python ExG detector.
 import atexit
 import json
 import logging
+import os
 import queue
+import select
 import struct
 import subprocess
 import threading
+import time
 from collections import deque
 
 import numpy as np
@@ -54,9 +60,13 @@ class RustSprayDetector:
     STARTUP_TIMEOUT_S = 5.0
     FRAME_TIMEOUT_S = 0.10   # 100 ms — safe at up to 30 km/h
     MAX_RESTARTS = 3
+    # Healthy frames since the last restart needed to win the restart budget
+    # back (~10 s at 30 fps), so transient hiccups spread over a long field
+    # session don't accumulate into a permanent exg fallback.
+    RESTART_RESET_FRAMES = 300
 
     def __init__(self, binary_path: str, config_path: str,
-                 num_lanes: int = 4, mock_gpio: bool = False,
+                 num_lanes: int = 4, mock_gpio: bool = True,
                  frame_timeout_s: float = None, max_restarts: int = None,
                  startup_timeout_s: float = None):
         self.binary_path = str(binary_path)
@@ -190,6 +200,10 @@ class RustSprayDetector:
                 stderr=subprocess.PIPE,
                 bufsize=0,
             )
+            # Non-blocking stdin so _write_frame can enforce the frame
+            # deadline on the write side too — frames are larger than the
+            # pipe buffer, so a blocking write() could stall indefinitely.
+            os.set_blocking(self._process.stdin.fileno(), False)
             self._stdout_queue = queue.Queue()
             self._frames_since_start = 0
 
@@ -260,25 +274,59 @@ class RustSprayDetector:
     # IPC
     # ------------------------------------------------------------------ #
 
+    def _write_frame(self, process, payload: bytes, deadline: float) -> None:
+        """Write ``payload`` to the subprocess's non-blocking stdin, bounded
+        by ``deadline`` (time.monotonic()).
+
+        A frame at OWL resolutions (hundreds of KB) is far larger than the
+        64 KB pipe buffer, so a subprocess that stops draining stdin would
+        block a plain write() forever and freeze OWL's whole main loop —
+        camera, dashboard and relay control included. select() with a
+        deadline turns that stall into a RustSprayIPCError, which the
+        restart machinery already handles.
+        """
+        fd = process.stdin.fileno()
+        view = memoryview(payload)
+        sent = 0
+        while sent < len(view):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RustSprayIPCError(
+                    f"stdin write stalled after {sent}/{len(view)} bytes — "
+                    f"subprocess stopped reading frames. {self._death_message(process)}")
+            try:
+                _, writable, _ = select.select([], [fd], [], remaining)
+            except OSError as e:
+                raise RustSprayIPCError(f"stdin unusable: {e}. {self._death_message(process)}")
+            if not writable:
+                raise RustSprayIPCError(
+                    f"stdin write stalled after {sent}/{len(view)} bytes — "
+                    f"subprocess stopped reading frames. {self._death_message(process)}")
+            try:
+                sent += os.write(fd, view[sent:])
+            except BlockingIOError:
+                continue
+            except (BrokenPipeError, OSError) as e:
+                raise RustSprayIPCError(f"stdin write failed: {e}. {self._death_message(process)}")
+
     def _send_frame(self, frame_rgb24: bytes, width: int, height: int) -> dict:
         """Write one frame to stdin, read the JSON response from stdout."""
         process = self._process
         if process is None or process.poll() is not None:
             raise RustSprayIPCError(self._death_message(process))
 
-        header = struct.pack('<II', width, height)
-        try:
-            # header + pixels in a single write per the IPC contract
-            process.stdin.write(header + frame_rgb24)
-            process.stdin.flush()
-        except (BrokenPipeError, OSError) as e:
-            raise RustSprayIPCError(f"stdin write failed: {e}. {self._death_message(process)}")
-
         # Allow the (re)started binary time to initialise before the first
-        # frame; steady-state frames get the strict per-frame budget.
+        # frame; steady-state frames get the strict per-frame budget. The
+        # deadline covers the whole write+read round trip.
         timeout = self.startup_timeout_s if self._frames_since_start == 0 else self.frame_timeout_s
+        deadline = time.monotonic() + timeout
+
+        # header + pixels in a single buffer per the IPC contract
+        header = struct.pack('<II', width, height)
+        self._write_frame(process, header + frame_rgb24, deadline)
+
         try:
-            line = self._stdout_queue.get(timeout=timeout)
+            line = self._stdout_queue.get(timeout=max(deadline - time.monotonic(), 0.001))
         except queue.Empty:
             raise RustSprayIPCError(
                 f"no response within {timeout * 1000:.0f} ms "
@@ -310,7 +358,15 @@ class RustSprayDetector:
                 raise RuntimeError("RustSprayDetector is closed")
             while True:
                 try:
-                    return self._send_frame(frame_rgb24, width, height)
+                    response = self._send_frame(frame_rgb24, width, height)
+                    # A sustained healthy run wins the restart budget back;
+                    # only crash *loops* should exhaust max_restarts.
+                    if self._restart_count and self._frames_since_start >= self.RESTART_RESET_FRAMES:
+                        logger.info(
+                            f"Rust-Spray healthy for {self._frames_since_start} frames "
+                            f"since last restart — resetting restart budget")
+                        self._restart_count = 0
+                    return response
                 except RustSprayIPCError as e:
                     if self._restart_count >= self.max_restarts:
                         self._terminate_process()
