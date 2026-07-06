@@ -12,7 +12,7 @@
  */
 const CONFIG_FIELD_DEFS = {
     'System': {
-        'algorithm': { type: 'select', options: ['exhsv', 'exg', 'hsv', 'gog', 'gog-hybrid'], help: 'Detection algorithm' },
+        'algorithm': { type: 'select', options: ['exhsv', 'exg', 'hsv', 'gog', 'gog-hybrid', 'rustspray'], help: 'Detection algorithm' },
         'input_file_or_directory': { type: 'text', help: 'Leave empty for camera input' },
         'relay_num': { type: 'select', options: ['1', '2', '4', '8', '12', '16'], help: 'Number of relays' },
         'actuation_duration': { type: 'number', step: 0.01, min: 0.01, max: 2.0, help: 'Spray duration in seconds' },
@@ -115,6 +115,13 @@ const CONFIG_FIELD_DEFS = {
         'track_class_window': { type: 'number', min: 1, max: 20, help: 'Frames of class history for majority vote' },
         'track_crop_persist': { type: 'number', min: 1, max: 10, help: 'Frames to persist crop mask after detection drops' },
         'detection_persist_frames': { type: 'number', min: 0, max: 15, step: 1, help: 'Frames to persist lost detections via Kalman prediction (0=disabled, 5=~0.5s)' }
+    },
+    'RustSpray': {
+        'binary': { type: 'text', help: 'Path to the rustspray binary' },
+        'config': { type: 'text', help: 'Path to the Rust-Spray TOML config (thresholds + GPIO pins)' },
+        'mock_gpio': { type: 'boolean', help: 'Log GPIO changes to stderr instead of driving pins (development)' },
+        'frame_timeout_ms': { type: 'number', min: 10, max: 5000, help: 'Per-frame IPC timeout in milliseconds' },
+        'max_restarts': { type: 'number', min: 0, max: 10, help: 'Subprocess restarts before falling back to exg' }
     },
     'Relays': { _isRelaySection: true }
 };

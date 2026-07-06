@@ -38,6 +38,7 @@ You can create custom presets by saving from the dashboard. Custom presets are s
 | `[DataCollection]` | Image sampling settings, save directory, logging |
 | `[Relays]` | Maps relay IDs to GPIO pin numbers |
 | `[Tracking]` | ByteTrack weed tracking settings |
+| `[RustSpray]` | Optional Rust-Spray high-performance detection backend |
 | `[Visualisation]` | Display settings when running with `--show-display` |
 | `[Sensitivity]` | Active sensitivity preset |
 | `[Sensitivity_Low/Medium/High]` | Built-in sensitivity preset thresholds |
@@ -52,7 +53,7 @@ Defaults shown are from `GENERAL_CONFIG.ini`.
 
 | Key | Default | Range / Valid values | Description |
 |-----|---------|---------------------|-------------|
-| `algorithm` | `exhsv` | `exg`, `exgr`, `maxg`, `nexg`, `exhsv`, `hsv`, `gndvi`, `gog`, `gog-hybrid` | Detection algorithm (see table below) |
+| `algorithm` | `exhsv` | `exg`, `exgr`, `maxg`, `nexg`, `exhsv`, `hsv`, `gndvi`, `gog`, `gog-hybrid`, `rustspray` | Detection algorithm (see table below) |
 | `input_file_or_directory` | *(empty)* | File or directory path | Path to video, image, or directory for offline processing. Leave empty for live camera |
 | `relay_num` | `4` | 0+ (integer) | Number of relays connected to the OWL. Must match entries in `[Relays]` |
 | `actuation_duration` | `0.15` | Seconds (float) | How long each relay stays on when a weed is detected |
@@ -72,6 +73,7 @@ Defaults shown are from `GENERAL_CONFIG.ini`.
 | `gndvi` | Green NDVI | (NIR - green) / (NIR + green) | **Requires NIR camera.** Not for standard setups |
 | `gog` | Green-on-Green | Ultralytics YOLO object detection | For in-crop weed detection. Requires a trained model (see `[GreenOnGreen]`) |
 | `gog-hybrid` | AI + Colour | YOLO crop mask + ExHSV colour detection | Uses YOLO to identify crop regions, then runs ExHSV on non-crop areas. Best of both worlds for in-crop scenarios |
+| `rustspray` | Rust-Spray backend | SIMD ExG / green-ratio / chroma in a Rust subprocess | Requires the [Rust-Spray](https://github.com/cropcrusaders/Rust-Spray) binary (see `[RustSpray]`). Falls back to `exg` automatically on failure |
 
 All algorithms except `gog`, `gog-hybrid`, and `hsv` use the `[GreenOnBrown]` thresholds. The `hsv` algorithm uses only the HSV thresholds (hue, saturation, brightness). The `gog` algorithm ignores `[GreenOnBrown]` entirely and uses `[GreenOnGreen]` settings instead. The `gog-hybrid` algorithm uses both `[GreenOnGreen]` (for YOLO crop detection) and `[GreenOnBrown]` (for ExHSV weed detection in non-crop areas).
 
@@ -139,6 +141,22 @@ Optional weed tracking using ByteTrack. When enabled, YOLO runs in tracking mode
 | `tracking_enabled` | `False` | `True` / `False` | Enable ByteTrack weed tracking |
 | `track_class_window` | `5` | 1+ (integer) | Number of recent frames to use for majority-vote class smoothing |
 | `track_crop_persist` | `3` | 0+ (integer) | Number of frames to persist a crop mask after the crop is no longer detected. Only used in `gog-hybrid` mode |
+
+### `[RustSpray]`
+
+Used when `algorithm = rustspray`. Runs the [Rust-Spray](https://github.com/cropcrusaders/Rust-Spray) binary as a high-performance detection inner loop: OWL keeps capturing frames with picamera2 and streams them to the subprocess as raw RGB24 over stdin; Rust-Spray returns per-lane spray decisions as newline-delimited JSON (IPC protocol v1, documented in Rust-Spray's `INTEGRATION.md`).
+
+Colour thresholds and solenoid GPIO pins are configured in Rust-Spray's own TOML file, **not** in `[GreenOnBrown]` or `[Relays]`. If Rust-Spray drives the GPIO pins directly, its TOML pin assignments must match the `[Relays]` wiring — alternatively set `mock_gpio = True` and let OWL's relay controller keep driving the pins from the lane states.
+
+At startup OWL verifies the binary's IPC protocol version (`rustspray --output-version`). If the subprocess crashes or misses the frame deadline it is restarted up to `max_restarts` times, after which OWL logs the failure and falls back to the Python `exg` detector automatically.
+
+| Key | Default | Range / Valid values | Description |
+|-----|---------|---------------------|-------------|
+| `binary` | `/usr/local/bin/rustspray` | File path | Path to the `rustspray` binary (`rustspray-aarch64` for RPi 4/5, `rustspray-armv7` for RPi 3B+) |
+| `config` | `/etc/rustspray/config.toml` | File path | Rust-Spray TOML config (thresholds, lanes, GPIO pins) |
+| `mock_gpio` | `False` | `True` / `False` | Rust-Spray logs GPIO changes to stderr instead of driving pins. Use for development or when OWL's relay controller owns the pins |
+| `frame_timeout_ms` | `100` | 10--5000 (integer) | Per-frame IPC deadline. 100 ms is safe at up to 30 km/h |
+| `max_restarts` | `3` | 0--10 (integer) | Subprocess restarts before falling back to the `exg` detector |
 
 ### `[Controller]`
 
