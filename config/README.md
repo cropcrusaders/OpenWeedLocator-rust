@@ -155,6 +155,8 @@ Colour thresholds (`[vision]`), lane count and hysteresis (`[lanes]`), and GPIO 
 
 At startup OWL verifies the binary's IPC protocol version (`rustspray --output-version`). If the subprocess crashes or misses the frame deadline it is restarted up to `max_restarts` times, after which OWL logs the failure and falls back to the Python `exg` detector automatically. Rust-Spray forces all lanes off on every exit path, so a crash never leaves a valve open.
 
+For a detection-lag comparison against the Python detectors see the [Rust-Spray section of the main README](../README.md#lag-comparison-python-detectors-vs-rust-spray), or run `python benchmarks/bench_rustspray_lag.py` yourself.
+
 | Key | Default | Range / Valid values | Description |
 |-----|---------|---------------------|-------------|
 | `binary` | `/usr/local/bin/rustspray` | File path | Path to the `rustspray` binary (`rustspray-aarch64` for RPi 4/5, `rustspray-armv7` for RPi 3B+) |
